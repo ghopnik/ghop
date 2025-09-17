@@ -82,6 +82,7 @@ Options:
   -h, --help       Print help and exit
   -v, --version    Print version and exit
   -t, --tui        Run in TUI mode (panels per command)
+  -f, --file FILE  Load commands from YAML file; then specify the set name to run
 ```
 
 * **Commands** are executed **via a shell** (see [Shells & quoting](#shells--quoting)).
@@ -124,6 +125,40 @@ ghop 'npm run build' 'npm test'
 ```
 
 > Note: quoting rules differ on Windows; see [Shells & quoting](#shells--quoting).
+
+### YAML configuration (-f/--file)
+
+You can store named sets of commands in a YAML file and run one set by name using the -f/--file flag.
+
+Supported formats:
+
+- Flat map of set names to arrays of commands:
+
+```yaml
+# ghop.yml
+build: ["cargo build", "cargo test"]
+lint:  ["cargo clippy", "cargo fmt -- --check"]
+```
+
+- Or with a top-level "sets" key:
+
+```yaml
+# ghop.yml
+sets:
+  dev:
+    - npm run dev
+    - cargo watch -x run
+```
+
+Usage:
+
+```bash
+# Run a set by name
+ghop -f ghop.yml build
+
+# TUI mode with a set
+ghop --tui -f ghop.yml dev
+```
 
 ---
 

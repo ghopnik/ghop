@@ -96,3 +96,48 @@ fn propagates_nonzero_exit_code() {
         .failure()
         .code(predicate::eq(3));
 }
+
+// ---- Tests for -f/--file (YAML config) ----
+
+#[test]
+fn file_flag_requires_set_name() {
+    use std::io::Write;
+    let mut tf = tempfile::NamedTempFile::new().expect("temp file");
+    // valid YAML but we won't use it in this test
+    writeln!(tf, "build: ['echo ok']").unwrap();
+
+    let mut cmd = bin();
+    cmd.arg("-f").arg(tf.path());
+    cmd.assert()
+        .failure()
+        .code(predicate::eq(1))
+        .stderr(predicate::str::contains("must specify the set name"));
+}
+
+#[test]
+fn runs_set_from_flat_yaml() {
+    use std::io::Write;
+    let mut tf = tempfile::NamedTempFile::new().expect("temp file");
+    writeln!(tf, "build: ['echo hello', 'echo world']").unwrap();
+
+    let mut cmd = bin();
+    cmd.arg("-f").arg(tf.path()).arg("build");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("[1] hello"))
+        .stdout(predicate::str::contains("[2] world"));
+}
+
+#[test]
+fn runs_set_from_wrapper_yaml() {
+    use std::io::Write;
+    let mut tf = tempfile::NamedTempFile::new().expect("temp file");
+    writeln!(tf, "sets:\n  dev: ['echo red', 'echo blue']").unwrap();
+
+    let mut cmd = bin();
+    cmd.arg("--file").arg(tf.path()).arg("dev");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("[1] red"))
+        .stdout(predicate::str::contains("[2] blue"));
+}

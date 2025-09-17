@@ -1,8 +1,11 @@
 use std::env;
+use std::fs;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::collections::HashMap;
+use serde::Deserialize;
 
 // TUI deps
 use anyhow::Result;
@@ -10,19 +13,72 @@ use crossterm::{event, execute, terminal};
 use crossterm::event::{Event, KeyCode};
 use ratatui::{prelude::*, widgets::*};
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone)]
 struct Options {
     tui: bool,
+    config_file: Option<String>,
 }
 
 fn print_help() {
     println!(
-        "ghop [options] <command1> <command2> ... <commandN>\n\nOptions:\n    -h, --help          Print this help message.\n    -v, --version       Print the version.\n    -t, --tui           Run in TUI mode."
+        "ghop [options] <command1> <command2> ... <commandN>\n\nOptions:\n    -h, --help          Print this help message.\n    -v, --version       Print the version.\n    -t, --tui           Run in TUI mode.\n    -f, --file <FILE>   Load commands from YAML file; then specify the set name to run.\n\nYAML format examples:\n    # Simple map of sets\n    build: [\"cargo build\", \"cargo test\"]\n    lint:  [\"cargo clippy\", \"cargo fmt -- --check\"]\n\n    # Or use a top-level 'sets' key\n    sets:\n      dev: [\"npm run dev\", \"cargo watch -x run\"]\n\nUsage with -f:\n    ghop -f ghop.yml build\n"
     );
 }
 
 fn is_option(arg: &str) -> bool {
     arg.starts_with('-')
+}
+
+#[derive(Deserialize, Debug)]
+struct SetsWrapper {
+    sets: HashMap<String, Vec<String>>,
+}
+
+fn load_commands_from_yaml(path: &str, set_name: &str) -> Result<Vec<String>, String> {
+    let text = fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read YAML file '{path}': {e}"))?;
+
+    // Try as a flat map first
+    match serde_yaml::from_str::<HashMap<String, Vec<String>>>(&text) {
+        Ok(map) => {
+            if let Some(cmds) = map.get(set_name) {
+                if cmds.is_empty() {
+                    return Err(format!("Set '{set_name}' in '{path}' is empty"));
+                }
+                return Ok(cmds.clone());
+            } else {
+                let mut names: Vec<_> = map.keys().cloned().collect();
+                names.sort();
+                return Err(format!(
+                    "Set '{set_name}' not found in '{path}'. Available sets: {}",
+                    if names.is_empty() { "<none>".to_string() } else { names.join(", ") }
+                ));
+            }
+        }
+        Err(_) => {
+            // Try wrapper with 'sets' key
+            match serde_yaml::from_str::<SetsWrapper>(&text) {
+                Ok(w) => {
+                    if let Some(cmds) = w.sets.get(set_name) {
+                        if cmds.is_empty() {
+                            return Err(format!("Set '{set_name}' in '{path}' is empty"));
+                        }
+                        return Ok(cmds.clone());
+                    } else {
+                        let mut names: Vec<_> = w.sets.keys().cloned().collect();
+                        names.sort();
+                        return Err(format!(
+                            "Set '{set_name}' not found in '{path}'. Available sets: {}",
+                            if names.is_empty() { "<none>".to_string() } else { names.join(", ") }
+                        ));
+                    }
+                }
+                Err(e2) => {
+                    return Err(format!("Failed to parse YAML in '{path}': {e2}"));
+                }
+            }
+        }
+    }
 }
 
 fn run_command(label: String, cmd: String, print_lock: Arc<Mutex<()>>) -> i32 {
@@ -245,6 +301,14 @@ fn main() {
                 opts.tui = true;
                 i += 1;
             }
+            "-f" | "--file" => {
+                if i + 1 >= args.len() {
+                    eprintln!("-f/--file requires a file path");
+                    std::process::exit(2);
+                }
+                opts.config_file = Some(args[i + 1].clone());
+                i += 2;
+            }
             _ => {
                 eprintln!("Unknown option: {arg}");
                 print_help();
@@ -253,12 +317,30 @@ fn main() {
         }
     }
 
-    // Remaining args are commands
-    let commands: Vec<String> = args.split_off(i);
-
-    if commands.is_empty() {
-        eprintln!("No commands provided. Use -h for help.");
-        std::process::exit(1);
+    // Determine commands
+    let mut commands: Vec<String> = Vec::new();
+    if let Some(cfg_path) = opts.config_file.clone() {
+        // The next non-option arg must be the set name
+        if i >= args.len() || is_option(&args[i]) {
+            eprintln!("When using -f/--file, you must specify the set name to run.");
+            std::process::exit(1);
+        }
+        let set_name = args[i].clone();
+        // Any extra trailing args are ignored for now
+        match load_commands_from_yaml(&cfg_path, &set_name) {
+            Ok(cmds) => commands = cmds,
+            Err(e) => {
+                eprintln!("{}", e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        // Remaining args are commands
+        commands = args.split_off(i);
+        if commands.is_empty() {
+            eprintln!("No commands provided. Use -h for help.");
+            std::process::exit(1);
+        }
     }
 
     if opts.tui {
