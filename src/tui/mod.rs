@@ -129,7 +129,7 @@ pub async fn run(commands: Vec<String>) -> Result<i32> {
             let list = List::new(items).block(Block::default().title("Output").borders(Borders::ALL));
             f.render_widget(list, chunks[1]);
 
-            let help = Paragraph::new("q=quit  ←/→=pane");
+            let help = Paragraph::new("q=quit  ←/→=pane  Tab=next  Shift-Tab=prev");
             f.render_widget(help, chunks[2]);
         })?;
 
@@ -149,6 +149,8 @@ pub async fn run(commands: Vec<String>) -> Result<i32> {
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
                 KeyCode::Left => { app.selected = app.selected.saturating_sub(1); }
                 KeyCode::Right => { app.selected = (app.selected + 1).min(commands.len()-1); }
+                KeyCode::Tab => { if !commands.is_empty() { app.selected = (app.selected + 1) % commands.len(); } }
+                KeyCode::BackTab => { if !commands.is_empty() { app.selected = if app.selected == 0 { commands.len()-1 } else { app.selected - 1 }; } }
                 _ => {}
             }
         }
