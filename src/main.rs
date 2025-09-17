@@ -10,7 +10,7 @@ use serde::Deserialize;
 // TUI deps
 use anyhow::Result;
 use crossterm::{event, execute, terminal};
-use crossterm::event::{Event, KeyCode};
+use crossterm::event::{Event, KeyCode, KeyModifiers};
 use ratatui::{prelude::*, widgets::*};
 
 #[derive(Default, Debug, Clone)]
@@ -155,7 +155,12 @@ impl App {
     }
 }
 
-async fn spawn_reader(mut child: tokio::process::Child, idx: usize, tx: tokio::sync::mpsc::Sender<LineMsg>) -> Result<i32> {
+async fn spawn_reader(
+    mut child: tokio::process::Child,
+    idx: usize,
+    tx: tokio::sync::mpsc::Sender<LineMsg>,
+    mut cancel_rx: tokio::sync::watch::Receiver<bool>,
+) -> Result<i32> {
     use tokio::io::{AsyncBufReadExt, BufReader as AsyncBufReader};
 
     let stdout = child.stdout.take().unwrap();
@@ -178,7 +183,16 @@ async fn spawn_reader(mut child: tokio::process::Child, idx: usize, tx: tokio::s
         }
     });
 
-    let status = child.wait().await?;
+    // Wait for process to exit or cancellation request
+    let status = tokio::select! {
+        res = child.wait() => { res? }
+        _ = cancel_rx.changed() => {
+            // Attempt to kill the child and wait for it to exit
+            let _ = child.kill().await;
+            child.wait().await?
+        }
+    };
+
     let _ = t_out.await; let _ = t_err.await;
     Ok(status.code().unwrap_or(-1))
 }
@@ -196,6 +210,8 @@ async fn run_tui(commands: Vec<String>) -> Result<i32> {
 
     // channels
     let (tx, mut rx) = tokio::sync::mpsc::channel::<LineMsg>(1024);
+    // cancellation signal for spawned processes
+    let (cancel_tx, cancel_rx) = tokio::sync::watch::channel::<bool>(false);
 
     // spawn processes
     let mut join_handles = Vec::new();
@@ -211,7 +227,8 @@ async fn run_tui(commands: Vec<String>) -> Result<i32> {
             .stderr(std::process::Stdio::piped())
             .spawn()?;
         let txc = tx.clone();
-        join_handles.push(tokio::spawn(spawn_reader(child, idx, txc)));
+        let crx = cancel_rx.clone();
+        join_handles.push(tokio::spawn(spawn_reader(child, idx, txc, crx)));
     }
     drop(tx);
 
@@ -259,7 +276,8 @@ async fn run_tui(commands: Vec<String>) -> Result<i32> {
         if event::poll(Duration::from_millis(10))?
             && let Event::Key(key) = event::read()? {
             match key.code {
-                KeyCode::Char('q') => break,
+                KeyCode::Char('q') | KeyCode::Char('Q') => break,
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
                 KeyCode::Left => { app.selected = app.selected.saturating_sub(1); }
                 KeyCode::Right => { app.selected = (app.selected + 1).min(commands.len()-1); }
                 _ => {}
@@ -270,6 +288,9 @@ async fn run_tui(commands: Vec<String>) -> Result<i32> {
     // teardown
     terminal::disable_raw_mode()?;
     execute!(std::io::stdout(), terminal::LeaveAlternateScreen, event::DisableMouseCapture)?;
+
+    // request cancellation/kill of all running processes
+    let _ = cancel_tx.send(true);
 
     // gather exit codes
     let mut worst = 0;
