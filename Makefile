@@ -21,7 +21,7 @@ build: ## Build debug binary
 	cargo build
 
 release: ## Build optimized release binary
-	cargo build --release
+	cargo build --release && strip target/release/$(BIN) && ls -lh target/release/$(BIN)
 
 run: ## Run the app (pass args with ARGS="...")
 	cargo run -- $(ARGS)
