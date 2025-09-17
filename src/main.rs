@@ -318,7 +318,7 @@ fn main() {
     }
 
     // Determine commands
-    let mut commands: Vec<String> = Vec::new();
+    let commands: Vec<String>;
     if let Some(cfg_path) = opts.config_file.clone() {
         // The next non-option arg must be the set name
         if i >= args.len() || is_option(&args[i]) {
@@ -327,13 +327,13 @@ fn main() {
         }
         let set_name = args[i].clone();
         // Any extra trailing args are ignored for now
-        match load_commands_from_yaml(&cfg_path, &set_name) {
-            Ok(cmds) => commands = cmds,
+        commands = match load_commands_from_yaml(&cfg_path, &set_name) {
+            Ok(cmds) => cmds,
             Err(e) => {
                 eprintln!("{}", e);
                 std::process::exit(1);
             }
-        }
+        };
     } else {
         // Remaining args are commands
         commands = args.split_off(i);
