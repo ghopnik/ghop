@@ -34,7 +34,7 @@ You’ll need a recent Rust toolchain (stable) with `cargo`.
 
 ```bash
 # Clone the repo
-git clone https://github.com/<your-username>/ghop
+git clone https://github.com/ghopnik/ghop
 cd ghop
 
 # Install to your Cargo bin dir (~/.cargo/bin/ghop)
