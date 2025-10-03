@@ -2,6 +2,7 @@
 name = "ghop"
 version = "0.2.0"
 edition = "2024"
+build = "build.rs"
 
 [dependencies]
 ratatui = "0.29.0"

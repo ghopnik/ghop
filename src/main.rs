@@ -4,6 +4,8 @@ mod config;
 mod runner;
 mod tui;
 
+const APP_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GIT_COMMIT_HASH"), ")");
+
 #[derive(Default, Debug, Clone)]
 struct Options {
     tui: bool,
@@ -37,7 +39,7 @@ fn main() {
                 return;
             }
             "-v" | "--version" => {
-                println!("{}", env!("CARGO_PKG_VERSION"));
+                println!("{}", APP_VERSION);
                 return;
             }
             "-t" | "--tui" => {
