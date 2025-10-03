@@ -59,16 +59,21 @@ If you publish packages, update this section with the exact commands.
 
 ## Quick start
 
-Run two commands in parallel:
+Define a set in ghop.yml and run it:
 
-```bash
-ghop "sleep 2 && echo A done" "sleep 1 && echo B done"
+```yaml
+sets:
+  dev:
+    - npm run dev
+    - cargo watch -x run
 ```
 
-Run in the TUI so each command gets its own panel:
+Run it:
 
 ```bash
-ghop --tui "cargo build" "cargo test" "cargo clippy"
+ghop dev
+# or with an explicit file
+ghop -f ghop.yml dev
 ```
 
 ---
@@ -76,13 +81,13 @@ ghop --tui "cargo build" "cargo test" "cargo clippy"
 ## Usage
 
 ```text
-ghop [options] <command1> <command2> ... <commandN>
+ghop [options] <set-name>
 
 Options:
   -h, --help       Print help and exit
   -v, --version    Print version and exit
   -t, --tui        Run in TUI mode (panels per command)
-  -f, --file FILE  Load commands from YAML file; then specify the set name to run
+  -f, --file FILE  YAML file to load (default: ghop.yml)
 ```
 
 * **Commands** are executed **via a shell** (see [Shells & quoting](#shells--quoting)).
@@ -93,38 +98,8 @@ Options:
 
 ## Examples
 
-### Basic parallel runs
 
-```bash
-# Build + test in parallel
-ghop "cargo build" "cargo test"
 
-# Ping two hosts simultaneously
-ghop "ping -c 3 1.1.1.1" "ping -c 3 8.8.8.8"
-
-# Run a sequence in each command (use your shell's operators)
-ghop "make -j4" "make test" "make lint"
-```
-
-### Use with scripts & Makefiles
-
-```makefile
-# Makefile
-.PHONY: ci
-ci:
-	ghop "cargo fmt -- --check" \
-	     "cargo clippy -- -D warnings" \
-	     "cargo test --all"
-```
-
-### Windows (PowerShell)
-
-```powershell
-ghop 'ping 1.1.1.1 -n 3' 'ping 8.8.8.8 -n 3'
-ghop 'npm run build' 'npm test'
-```
-
-> Note: quoting rules differ on Windows; see [Shells & quoting](#shells--quoting).
 
 ### YAML configuration (-f/--file)
 
@@ -284,7 +259,7 @@ cargo clippy -- -D warnings
 cargo test
 
 # Try the binary
-cargo run -- "echo hello" "echo world"
+cargo run -- -f ghop.yml dev
 ```
 
 ---
