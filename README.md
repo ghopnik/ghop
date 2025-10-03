@@ -132,15 +132,7 @@ You can store named sets of commands in a YAML file and run one set by name usin
 
 Supported formats:
 
-- Flat map of set names to arrays of commands:
-
-```yaml
-# ghop.yml
-build: ["cargo build", "cargo test"]
-lint:  ["cargo clippy", "cargo fmt -- --check"]
-```
-
-- Or with a top-level "sets" key:
+- Top-level "sets" key (only supported format):
 
 ```yaml
 # ghop.yml
@@ -149,6 +141,29 @@ sets:
     - npm run dev
     - cargo watch -x run
 ```
+
+Each item in a set can be either:
+- a plain string (the command), or
+- an object with fields:
+  - `command`: the command string
+  - `timeout` (seconds, optional): kill the command if it runs longer than this
+
+Example with timeouts:
+
+```yaml
+sets:
+  build:
+    - command: echo quick
+      timeout: 5
+    - echo no-timeout-here
+  long:
+    - command: "echo start; sleep 60; echo end"
+      timeout: 10  # this command will be terminated after ~10s
+```
+
+Notes:
+- Timeouts are enforced in the default (streamed) mode. In current builds, `--tui` runs commands but does not yet enforce per-command timeouts.
+- When a command times out, ghop terminates it and returns a non-zero exit code (124 for that command); overall process exit still follows the usual "any non-zero means failure" rule.
 
 Usage:
 

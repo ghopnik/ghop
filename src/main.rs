@@ -12,7 +12,7 @@ struct Options {
 
 fn print_help() {
     println!(
-        "ghop [options] <command1> <command2> ... <commandN>\n\nOptions:\n    -h, --help          Print this help message.\n    -v, --version       Print the version.\n    -t, --tui           Run in TUI mode.\n    -f, --file <FILE>   Load commands from YAML file; then specify the set name to run.\n\nYAML format examples:\n    # Simple map of sets\n    build: [\"cargo build\", \"cargo test\"]\n    lint:  [\"cargo clippy\", \"cargo fmt -- --check\"]\n\n    # Or use a top-level 'sets' key\n    sets:\n      dev: [\"npm run dev\", \"cargo watch -x run\"]\n\nUsage with -f:\n    ghop -f ghop.yml build\n"
+        "ghop [options] <set-name>\n\nGhop reads commands from a YAML file (ghop.yml by default) and runs the named set.\n\nOptions:\n    -h, --help            Print this help message.\n    -v, --version         Print the version.\n    -t, --tui             Run in TUI mode.\n    -f, --file <FILE>     YAML file to load (default: ghop.yml).\n\nYAML format example (only supported format):\n    sets:\n      dev: [\"npm run dev\", \"cargo watch -x run\"]\n\nExamples:\n    ghop build\n    ghop -f ghop.yml dev\n"
     );
 }
 
@@ -21,7 +21,7 @@ fn is_option(arg: &str) -> bool {
 }
 
 fn main() {
-    let mut args = env::args().skip(1).collect::<Vec<_>>();
+    let args = env::args().skip(1).collect::<Vec<_>>();
 
     // Parse options
     let mut opts = Options::default();
@@ -60,36 +60,26 @@ fn main() {
         }
     }
 
-    // Determine commands
-    let commands: Vec<String>;
-    if let Some(cfg_path) = opts.config_file.clone() {
-        // The next non-option arg must be the set name
-        if i >= args.len() || is_option(&args[i]) {
-            eprintln!("When using -f/--file, you must specify the set name to run.");
-            std::process::exit(1);
-        }
-        let set_name = args[i].clone();
-        // Any extra trailing args are ignored for now
-        commands = match config::load_commands_from_yaml(&cfg_path, &set_name) {
-            Ok(cmds) => cmds,
-            Err(e) => {
-                eprintln!("{}", e);
-                std::process::exit(1);
-            }
-        };
-    } else {
-        // Remaining args are commands
-        commands = args.split_off(i);
-        if commands.is_empty() {
-            eprintln!("No commands provided. Use -h for help.");
-            std::process::exit(1);
-        }
+    // Determine commands from YAML (default ghop.yml) and require set name
+    let cfg_path = opts.config_file.clone().unwrap_or_else(|| "ghop.yml".to_string());
+    if i >= args.len() || is_option(&args[i]) {
+        eprintln!("No set specified. Provide a set name to run (e.g., 'ghop build').");
+        std::process::exit(1);
     }
+    let set_name = args[i].clone();
+    let commands = match config::load_commands_from_yaml(&cfg_path, &set_name) {
+        Ok(cmds) => cmds,
+        Err(e) => {
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }
+    };
 
     if opts.tui {
-        // Run async TUI mode
+        // Run async TUI mode (currently ignores per-command timeouts in TUI)
+        let commands_str: Vec<String> = commands.iter().map(|c| c.command.clone()).collect();
         let rt = tokio::runtime::Builder::new_multi_thread().enable_io().enable_time().build().expect("tokio runtime");
-        match rt.block_on(tui::run(commands)) {
+        match rt.block_on(tui::run(commands_str)) {
             Ok(code) => {
                 if code != 0 { std::process::exit(code); }
                 return;

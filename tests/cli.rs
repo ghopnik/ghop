@@ -20,15 +20,19 @@ fn no_commands_errors() {
     cmd.assert()
         .failure()
         .code(predicate::eq(1))
-        .stderr(predicate::str::contains("No commands provided"));
+        .stderr(predicate::str::contains("No set specified"));
 }
 
 #[cfg(unix)]
 #[test]
 fn stdout_labeling_unix() {
     // echo produces a trailing newline; expect labeled output on stdout
+    use std::io::Write;
+    let mut tf = tempfile::NamedTempFile::new().expect("temp file");
+    writeln!(tf, "sets:\n  s: ['echo hello']").unwrap();
+
     let mut cmd = bin();
-    cmd.arg("echo hello");
+    cmd.arg("--file").arg(tf.path()).arg("s");
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("[1] hello"));
@@ -37,9 +41,13 @@ fn stdout_labeling_unix() {
 #[cfg(windows)]
 #[test]
 fn stdout_labeling_windows() {
-    // On Windows, use built-in echo via cmd; our app wraps the string in cmd /C
+    // On Windows, use built-in echo via cmd; run via YAML set
+    use std::io::Write;
+    let mut tf = tempfile::NamedTempFile::new().expect("temp file");
+    writeln!(tf, "sets:\n  s: ['echo hello']").unwrap();
+
     let mut cmd = bin();
-    cmd.arg("echo hello");
+    cmd.arg("--file").arg(tf.path()).arg("s");
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("[1] hello"));
@@ -48,12 +56,12 @@ fn stdout_labeling_windows() {
 #[cfg(unix)]
 #[test]
 fn stderr_labeling_unix() {
+    use std::io::Write;
+    let mut tf = tempfile::NamedTempFile::new().expect("temp file");
+    writeln!(tf, "sets:\n  s: ['echo oops 1>&2']").unwrap();
+
     let mut cmd = bin();
-    // Redirect to stderr
-    cmd.arg("sh -c 'echo oops 1>&2'");
-    // But our app itself already wraps with sh -c, so we can simply provide the redirection directly
-    let mut cmd = bin();
-    cmd.arg("echo oops 1>&2");
+    cmd.arg("--file").arg(tf.path()).arg("s");
     cmd.assert()
         .success()
         .stderr(predicate::str::contains("[1][err] oops"));
@@ -62,9 +70,12 @@ fn stderr_labeling_unix() {
 #[cfg(windows)]
 #[test]
 fn stderr_labeling_windows() {
+    use std::io::Write;
+    let mut tf = tempfile::NamedTempFile::new().expect("temp file");
+    writeln!(tf, "sets:\n  s: ['echo oops 1>&2']").unwrap();
+
     let mut cmd = bin();
-    // Redirection works in cmd
-    cmd.arg("echo oops 1>&2");
+    cmd.arg("--file").arg(tf.path()).arg("s");
     cmd.assert()
         .success()
         .stderr(predicate::str::contains("[1][err] oops"));
@@ -74,10 +85,13 @@ fn stderr_labeling_windows() {
 #[test]
 fn ansi_passthrough_unix() {
     // Print red text using ANSI escapes; ensure they are preserved in stdout
-    let esc = "\u{001b}"; // ESC
-    let arg = format!("printf '{}[31mRED{}[0m\\n'", esc, esc);
+    use std::io::Write;
+    let mut tf = tempfile::NamedTempFile::new().expect("temp file");
+    // Use printf with octal escapes to avoid embedding raw control characters in YAML
+    writeln!(tf, "sets:\n  s: ['printf \"\\033[31mRED\\033[0m\\n\"']").unwrap();
+
     let mut cmd = bin();
-    cmd.arg(arg);
+    cmd.arg("--file").arg(tf.path()).arg("s");
     // We expect the raw escape sequences to be present in the output
     cmd.assert()
         .success()
@@ -87,11 +101,12 @@ fn ansi_passthrough_unix() {
 #[cfg(unix)]
 #[test]
 fn propagates_nonzero_exit_code() {
+    use std::io::Write;
+    let mut tf = tempfile::NamedTempFile::new().expect("temp file");
+    writeln!(tf, "sets:\n  s: ['exit 3']").unwrap();
+
     let mut cmd = bin();
-    cmd.arg("sh -c 'exit 3'");
-    // But since our app wraps with sh -c already, we should just pass `exit 3` directly
-    let mut cmd = bin();
-    cmd.arg("exit 3");
+    cmd.arg("--file").arg(tf.path()).arg("s");
     cmd.assert()
         .failure()
         .code(predicate::eq(3));
@@ -111,22 +126,9 @@ fn file_flag_requires_set_name() {
     cmd.assert()
         .failure()
         .code(predicate::eq(1))
-        .stderr(predicate::str::contains("must specify the set name"));
+        .stderr(predicate::str::contains("No set specified"));
 }
 
-#[test]
-fn runs_set_from_flat_yaml() {
-    use std::io::Write;
-    let mut tf = tempfile::NamedTempFile::new().expect("temp file");
-    writeln!(tf, "build: ['echo hello', 'echo world']").unwrap();
-
-    let mut cmd = bin();
-    cmd.arg("-f").arg(tf.path()).arg("build");
-    cmd.assert()
-        .success()
-        .stdout(predicate::str::contains("[1] hello"))
-        .stdout(predicate::str::contains("[2] world"));
-}
 
 #[test]
 fn runs_set_from_wrapper_yaml() {

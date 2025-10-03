@@ -1,0 +1,8 @@
+# this is a test config file for ghop
+sets:
+  echo-test:
+    - echo 1; sleep 5
+    - echo 2; sleep 10
+  timeout-test:
+    - command: echo 1; sleep 60
+      timeout: 30
