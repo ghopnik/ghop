@@ -2,6 +2,12 @@ use anyhow::Result;
 use ratatui::{prelude::*, widgets::*};
 use crossterm::{event, execute, terminal};
 use crossterm::event::{Event, KeyCode, KeyModifiers};
+use tokio::io::{AsyncBufReadExt, BufReader as AsyncBufReader};
+use tokio::process::Child;
+use tokio::sync::{mpsc, watch};
+
+const DEFAULT_EXIT_CODE: i32 = -1;
+
 
 #[derive(Clone, Copy, Debug)]
 enum StreamKind { Stdout, Stderr }
@@ -24,46 +30,74 @@ impl App {
     }
 }
 
-async fn spawn_reader(
-    mut child: tokio::process::Child,
+async fn forward_lines<R>(
+    mut lines: tokio::io::Lines<tokio::io::BufReader<R>>,
     idx: usize,
-    tx: tokio::sync::mpsc::Sender<LineMsg>,
-    mut cancel_rx: tokio::sync::watch::Receiver<bool>,
+    kind: StreamKind,
+    tx: mpsc::Sender<LineMsg>,
+) where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    while let Ok(Some(text)) = lines.next_line().await {
+        // Ignore send errors (receiver might have been dropped)
+        let _ = tx.send(make_line_msg(idx, kind, text)).await;
+    }
+}
+
+#[inline]
+fn make_line_msg(idx: usize, kind: StreamKind, text: String) -> LineMsg {
+    LineMsg { idx, kind, text }
+}
+
+// Reads child's stdout/stderr lines, forwards them via tx, and returns exit code.
+async fn spawn_reader(
+    mut child: Child,
+    idx: usize,
+    tx: mpsc::Sender<LineMsg>,
+    mut cancel_rx: watch::Receiver<bool>,
 ) -> Result<i32> {
-    use tokio::io::{AsyncBufReadExt, BufReader as AsyncBufReader};
+    // Gracefully handle missing stdio instead of panicking
+    let stdout = match child.stdout.take() {
+        Some(s) => s,
+        None => return Ok(DEFAULT_EXIT_CODE),
+    };
+    let stderr = match child.stderr.take() {
+        Some(s) => s,
+        None => return Ok(DEFAULT_EXIT_CODE),
+    };
 
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
+    let out_reader = AsyncBufReader::new(stdout).lines();
+    let err_reader = AsyncBufReader::new(stderr).lines();
 
-    let mut out = AsyncBufReader::new(stdout).lines();
-    let mut err = AsyncBufReader::new(stderr).lines();
+    // Spawn independent forwarding tasks
+    let stdout_task = {
+        let tx_out = tx.clone();
+        tokio::spawn(async move {
+            forward_lines(out_reader, idx, StreamKind::Stdout, tx_out).await;
+        })
+    };
+    let stderr_task = {
+        let tx_err = tx.clone();
+        tokio::spawn(async move {
+            forward_lines(err_reader, idx, StreamKind::Stderr, tx_err).await;
+        })
+    };
 
-    let tx_out = tx.clone();
-    let t_out = tokio::spawn(async move {
-        while let Ok(Some(line)) = out.next_line().await {
-            let _ = tx_out.send(LineMsg { idx, kind: StreamKind::Stdout, text: line }).await;
-        }
-    });
-
-    let tx_err = tx.clone();
-    let t_err = tokio::spawn(async move {
-        while let Ok(Some(line)) = err.next_line().await {
-            let _ = tx_err.send(LineMsg { idx, kind: StreamKind::Stderr, text: line }).await;
-        }
-    });
-
-    // Wait for process to exit or cancellation request
+    // Wait for a process to exit or cancellation
     let status = tokio::select! {
-        res = child.wait() => { res? }
+        res = child.wait() => res?,
         _ = cancel_rx.changed() => {
-            // Attempt to kill the child and wait for it to exit
+            // Best-effort terminate and wait
             let _ = child.kill().await;
             child.wait().await?
         }
     };
 
-    let _ = t_out.await; let _ = t_err.await;
-    Ok(status.code().unwrap_or(-1))
+    // Ensure forwarding tasks complete
+    let _ = stdout_task.await;
+    let _ = stderr_task.await;
+
+    Ok(status.code().unwrap_or(DEFAULT_EXIT_CODE))
 }
 
 pub async fn run(commands: Vec<String>) -> Result<i32> {
