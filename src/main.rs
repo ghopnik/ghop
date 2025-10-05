@@ -14,7 +14,23 @@ struct Options {
 
 fn print_help() {
     println!(
-        "ghop [options] <set-name>\n\nGhop reads commands from a YAML file (ghop.yml by default) and runs the named set.\n\nOptions:\n    -h, --help            Print this help message.\n    -v, --version         Print the version.\n    -t, --tui             Run in TUI mode.\n    -f, --file <FILE>     YAML file to load (default: ghop.yml).\n\nYAML format example (only supported format):\n    sets:\n      dev: [\"npm run dev\", \"cargo watch -x run\"]\n\nExamples:\n    ghop build\n    ghop -f ghop.yml dev\n"
+        "ghop [options] <set-name>\n
+        \n\
+        Ghop reads commands from a YAML file (ghop.yml by default) and runs the named set.\n
+        \n\
+        Options:\n\
+        \t-h, --help            Print this help message.\n\
+        \t-v, --version         Print the version.\n\
+        \t-t, --tui             Run in TUI mode.\n\
+        \t-f, --file <FILE>     YAML file to load (default: ghop.yml).\n
+        \n\
+        YAML format example (only supported format):\n\
+        \tsets:\n\
+        \t\tdev: [\"npm run dev\", \"cargo watch -x run\"]\n
+        \n\
+        Examples:\n\
+        \tghop build\n\
+        \tghop -f ghop.yml dev\n"
     );
 }
 
