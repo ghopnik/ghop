@@ -72,13 +72,17 @@ fn run_command(label: String, spec: CommandSpec, print_lock: Arc<Mutex<()>>) -> 
         }
     });
 
-    // Wait for child
-    let code = {
-        let mut ch = child_arc.lock().unwrap();
-        match ch.wait() {
-            Ok(status) => status.code().unwrap_or(-1),
-            Err(_) => -1,
+    // Wait for a child using non-blocking polling to allow watchdog to acquire the lock
+    let code = loop {
+        {
+            let mut ch = child_arc.lock().unwrap();
+            match ch.try_wait() {
+                Ok(Some(status)) => break status.code().unwrap_or(-1),
+                Ok(None) => { /* still running */ }
+                Err(_) => break -1,
+            }
         }
+        std::thread::sleep(std::time::Duration::from_millis(10));
     };
 
     // Wait for output threads (they should exit when pipes close)
