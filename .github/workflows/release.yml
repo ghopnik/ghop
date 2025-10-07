@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 env:
-  BIN_NAME: my-cli
+  BIN_NAME: ghop
 
 jobs:
   build:
