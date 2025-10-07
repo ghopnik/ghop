@@ -1,0 +1,185 @@
+name: Release (Rust, all OS/arch)
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+env:
+  BIN_NAME: my-cli
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ---- Linux (glibc + musl) ----
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            use_cross: false
+            archive: tar.gz
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
+            use_cross: true
+            archive: tar.gz
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-musl
+            use_cross: true
+            archive: tar.gz
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-musl
+            use_cross: true
+            archive: tar.gz
+
+          # ---- macOS (Intel + Apple Silicon) ----
+          - os: macos-13
+            target: x86_64-apple-darwin
+            use_cross: false
+            archive: tar.gz
+          - os: macos-14
+            target: aarch64-apple-darwin
+            use_cross: false
+            archive: tar.gz
+
+          # ---- Windows ----
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            use_cross: false
+            archive: zip
+          # (Optional/experimental) Windows ARM64 cross-target;
+          # remove if your toolchain/linker isn't set up.
+          - os: windows-2022
+            target: aarch64-pc-windows-msvc
+            use_cross: false
+            archive: zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust toolchain (${{ matrix.target }})
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross (Linux cross builds)
+        if: matrix.use_cross == true
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+
+      - name: Prepare package
+        shell: bash
+        run: |
+          set -euxo pipefail
+          DIST="dist"
+          mkdir -p "$DIST"
+
+          BIN="${BIN_NAME}"
+          EXE_SUFFIX=""
+          case "${{ matrix.target }}" in
+            *windows*) EXE_SUFFIX=".exe" ;;
+          esac
+
+          OUTDIR="target/${{ matrix.target }}/release"
+          BINARY_PATH="${OUTDIR}/${BIN}${EXE_SUFFIX}"
+
+          # Ensure binary exists
+          test -f "$BINARY_PATH"
+
+          # Strip symbols when possible (ignore failures)
+          case "${{ runner.os }}" in
+            macOS) strip -x "$BINARY_PATH" || true ;;
+            Linux) strip "$BINARY_PATH" || true ;;
+            Windows) : ;; # skip
+          esac
+
+          PKG_DIR="${DIST}/${BIN}-${{ github.ref_name }}-${{ matrix.target }}"
+          mkdir -p "$PKG_DIR"
+          cp "$BINARY_PATH" "$PKG_DIR/"
+
+          # Include docs if present
+          [ -f README.md ] && cp README.md "$PKG_DIR/" || true
+          [ -f LICENSE ] && cp LICENSE "$PKG_DIR/" || true
+          [ -f LICENSE.md ] && cp LICENSE.md "$PKG_DIR/" || true
+
+          # Archive
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            (cd "$DIST" && zip -r "${BIN}-${{ github.ref_name }}-${{ matrix.target }}.zip" "${BIN}-${{ github.ref_name }}-${{ matrix.target }}")
+          else
+            (cd "$DIST" && tar -czf "${BIN}-${{ github.ref_name }}-${{ matrix.target }}.tar.gz" "${BIN}-${{ github.ref_name }}-${{ matrix.target }}")
+          fi
+
+      - name: Generate checksum (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd dist
+          FILE=$(ls ${BIN_NAME}-${{ github.ref_name }}-${{ matrix.target }}.tar.gz 2>/dev/null || ls ${BIN_NAME}-${{ github.ref_name }}-${{ matrix.target }}.zip)
+          shasum -a 256 "$FILE" > "$FILE.sha256"
+
+      - name: Generate checksum (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          Set-Location dist
+          $file = Get-ChildItem "${env:BIN_NAME}-${env:GITHUB_REF_NAME}-${{ matrix.target }}.zip"
+          $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLower()
+          "$($hash) *$($file.Name)" | Out-File "$($file.Name).sha256" -Encoding ASCII
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            dist/${{ env.BIN_NAME }}-${{ github.ref_name }}-${{ matrix.target }}.tar.gz*
+            dist/${{ env.BIN_NAME }}-${{ github.ref_name }}-${{ matrix.target }}.zip*
+          if-no-files-found: error
+
+  publish:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Flatten artifacts
+        run: |
+          set -euxo pipefail
+          mkdir -p release
+          find dist -type f -maxdepth 2 -print -exec mv {} release/ \;
+
+      - name: List files
+        run: ls -l release
+
+      - name: Create GitHub Release & upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
