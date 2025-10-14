@@ -78,7 +78,7 @@ fn main() {
         }
     }
 
-    // Determine commands from YAML (default ghop.yml) and require set name
+    // Determine commands from YAML (default ghop.yml) and require a set name
     let cfg_path = opts.config_file.clone().unwrap_or_else(|| "ghop.yml".to_string());
     if i >= args.len() || is_option(&args[i]) {
         eprintln!("No set specified. Provide a set name to run (e.g., 'ghop build').");
