@@ -9,10 +9,17 @@ SHELL := /bin/sh
 # Binary/package name
 BIN := ghop
 
+# Docker params
+DOCKER ?= docker
+IMAGE ?= ghop
+TAG ?= latest
+FILE ?= ghop.yml
+SET ?= dev
+
 # Default target
 .DEFAULT_GOAL := help
 
-.PHONY: help build release run tui test check fmt clippy doc install uninstall clean ci
+.PHONY: help build release run tui test check fmt clippy doc install uninstall clean ci docker-build docker-run-help docker-run docker-dev
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z0-9_.-]+:.*##/ { printf "\033[36m%-18s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -25,17 +32,6 @@ release: ## Build optimized release binary
 
 run: ## Run the app (pass args with ARGS="...")
 	cargo run -- $(ARGS)
-
-# Run in TUI mode. Provide shell commands separated by ; or as quoted strings via CMDS
-# Example: make tui CMDS='"echo one" "sleep 1; echo two"'
-# Simpler: make tui CMDS="echo one"
-# On Windows, commands are routed through cmd; on Unix, sh -c; handled by the app itself.
-# We forward as-is; multiple commands must be provided as separate words.
-# e.g.: make tui CMDS='echo one' or CMDS='"echo one" "echo two"'
-# Note: make splits on spaces; quote appropriately.
-
-tui: ## Run in TUI mode (pass commands with CMDS="...")
-	cargo run -- -t -- $(CMDS)
 
 test: ## Run test suite
 	cargo test
@@ -68,3 +64,20 @@ ci: ## CI pipeline: fmt check (diff), clippy strict, tests
 	@cargo clippy --all-targets --all-features -- -D warnings
 	@echo "==> Tests"
 	@cargo test
+
+# --- Docker targets ---
+
+docker-build: ## Build Docker image (override IMAGE and TAG as needed)
+	$(DOCKER) build --progress plain -t $(IMAGE):$(TAG) .
+
+docker-run-help: ## Run container to show ghop --help
+	$(DOCKER) run --rm -it $(IMAGE):$(TAG) --help
+
+docker-run: ## Run container and pass ARGS to ghop (e.g., ARGS="--version")
+	$(DOCKER) run --rm -it $(IMAGE):$(TAG) $(ARGS)
+
+# Convenience target: mount current dir and run a set from FILE and SET
+# Example: make docker-dev SET=dev FILE=ghop.yml
+
+docker-dev: ## Run with current dir mounted: -f $(FILE) $(SET)
+	$(DOCKER) run --rm -it -v "$$PWD":/work $(IMAGE):$(TAG) -f $(FILE) $(SET)
