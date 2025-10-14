@@ -88,7 +88,8 @@ jobs:
             cargo build --release --target ${{ matrix.target }}
           fi
 
-      - name: Prepare package
+      - name: Prepare package (non-Windows)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euxo pipefail
@@ -111,7 +112,6 @@ jobs:
           case "${{ runner.os }}" in
             macOS) strip -x "$BINARY_PATH" || true ;;
             Linux) strip "$BINARY_PATH" || true ;;
-            Windows) : ;; # skip
           esac
 
           PKG_DIR="${DIST}/${BIN}-${{ github.ref_name }}-${{ matrix.target }}"
@@ -123,12 +123,35 @@ jobs:
           [ -f LICENSE ] && cp LICENSE "$PKG_DIR/" || true
           [ -f LICENSE.md ] && cp LICENSE.md "$PKG_DIR/" || true
 
-          # Archive
-          if [ "${{ matrix.archive }}" = "zip" ]; then
-            (cd "$DIST" && zip -r "${BIN}-${{ github.ref_name }}-${{ matrix.target }}.zip" "${BIN}-${{ github.ref_name }}-${{ matrix.target }}")
-          else
-            (cd "$DIST" && tar -czf "${BIN}-${{ github.ref_name }}-${{ matrix.target }}.tar.gz" "${BIN}-${{ github.ref_name }}-${{ matrix.target }}")
-          fi
+          # Archive (tar.gz on non-Windows)
+          (cd "$DIST" && tar -czf "${BIN}-${{ github.ref_name }}-${{ matrix.target }}.tar.gz" "${BIN}-${{ github.ref_name }}-${{ matrix.target }}")
+
+      - name: Prepare package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $Dist = "dist"
+          New-Item -ItemType Directory -Path $Dist -Force | Out-Null
+
+          $Bin = "$env:BIN_NAME"
+          $ExeSuffix = ".exe"
+          $OutDir = "target/${{ matrix.target }}/release"
+          $BinaryPath = "$OutDir/$Bin$ExeSuffix"
+
+          if (-not (Test-Path $BinaryPath)) { Write-Error "Binary not found: $BinaryPath"; exit 1 }
+
+          $PkgDir = "$Dist/$Bin-$env:GITHUB_REF_NAME-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $PkgDir -Force | Out-Null
+          Copy-Item $BinaryPath -Destination $PkgDir/
+
+          if (Test-Path README.md) { Copy-Item README.md -Destination $PkgDir/ }
+          if (Test-Path LICENSE) { Copy-Item LICENSE -Destination $PkgDir/ }
+          if (Test-Path LICENSE.md) { Copy-Item LICENSE.md -Destination $PkgDir/ }
+
+          $ZipPath = "$Dist/$Bin-$env:GITHUB_REF_NAME-${{ matrix.target }}.zip"
+          if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
+          Compress-Archive -Path "$PkgDir/*" -DestinationPath $ZipPath -Force
 
       - name: Generate checksum (Linux/macOS)
         if: runner.os != 'Windows'
