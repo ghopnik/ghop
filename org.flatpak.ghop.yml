@@ -1,0 +1,52 @@
+app-id: org.flatpak.ghop
+# Flatpak manifest to build and package the ghop CLI
+# Build with: flatpak-builder --user --install --force-clean build-dir org.flatpak.ghop.yml
+
+runtime: org.freedesktop.Platform
+sdk: org.freedesktop.Sdk
+runtime-version: "24.08"
+
+# Use the Rust toolchain extension provided by the Freedesktop SDK
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+
+command: ghop
+
+# ghop is a terminal (CLI) app. Export only the binary.
+finish-args:
+  # Allow general network access (ghop runs arbitrary user commands which may need network)
+  - --share=network
+  # Allow access to the user's home (typical for CLI tools). Adjust if you want stricter sandboxing.
+  - --filesystem=home
+  # Allow using the controlling TTY and inheriting env
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+
+# Common build options for Rust inside Flatpak
+build-options:
+  env:
+    # Make rustc/cargo from the extension available during build
+    PATH: /usr/lib/sdk/rust-stable/bin:/app/bin:/usr/bin
+    CARGO_HOME: /run/build/ghop/cargo
+    RUSTFLAGS: -C debuginfo=0
+
+modules:
+  - name: ghop
+    buildsystem: simple
+    build-commands:
+      # Ensure dependencies are fetched with the vendored target dir
+      - cargo --version
+      - cargo build --release --locked
+      - install -Dm755 target/release/ghop /app/bin/ghop
+    sources:
+      # Build from the local checkout when using flatpak-builder
+      - type: dir
+        path: .
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - /share/aclocal
+      - /share/doc
+      - /share/gtk-doc
+      - /share/man
