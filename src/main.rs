@@ -96,7 +96,11 @@ fn main() {
     if opts.tui {
         // Run async TUI mode (currently ignores per-command timeouts in TUI)
         let commands_str: Vec<String> = commands.iter().map(|c| c.command.clone()).collect();
-        let rt = tokio::runtime::Builder::new_multi_thread().enable_io().enable_time().build().expect("tokio runtime");
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .expect("tokio runtime");
         match rt.block_on(tui::run(commands_str)) {
             Ok(code) => {
                 if code != 0 { std::process::exit(code); }
